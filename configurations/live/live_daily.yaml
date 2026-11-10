@@ -1,0 +1,12 @@
+# Basket: daily candles. Runs once after the close (and again at start-up if today's candle is missing).
+name: "daily"
+enabled: true
+folder: "data_daily"
+kite_interval: "day"
+bar_minutes: 1440
+lookback_days: 7                       # days re-fetched each time, so a missed day is filled
+instruments:
+  index: true
+  futures: true
+  options: false                       # Kite has no daily series worth keeping for single option contracts
+overrides: {}

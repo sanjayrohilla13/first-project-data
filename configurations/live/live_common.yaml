@@ -1,0 +1,84 @@
+# =========================================================
+# LIVE COLLECTOR: settings shared by every basket
+#
+#   python live_collector.py --login          # Kite login (once a day, before the market opens)
+#   python live_collector.py                  # run continuously: a cycle every minute, log in logs/live_collector.log
+#   python live_collector.py --once           # one cycle now (downloads whatever is due, e.g. the whole day so far)
+#   python live_collector.py --dry-run        # print the plan (baskets, files, requests per cycle) and exit
+#
+# One file per basket sits next to this one (live_minute.yaml, live_5minute.yaml, live_hourly.yaml, live_daily.yaml).
+# Switch a basket off with `enabled: false`, or add a new basket by copying one and listing it under basket_files.
+# Data comes from Zerodha Kite Connect only. Kite has no implied volatility, so the iv column of the options is empty.
+# =========================================================
+
+kite:
+  token_file: ".kite_token.json"       # in this folder; written by `python live_collector.py --login`
+  max_requests_per_second: 2.8         # Kite allows 3 requests/s on the historical API
+  retries: 3                           # attempts per request before an instrument is skipped for this cycle
+  retry_wait_seconds: 2                # first wait between attempts (doubles each time)
+
+output:
+  root: "data"                        # relative to this folder (or an absolute path); each basket writes into root/<its folder>
+  # Files are written per day: nifty_<yyyymmdd>.csv, nifty_fut_<yyyymmdd>.csv, nifty_options_<yyyymmdd>.csv
+  # (daily baskets keep one file per instrument). Same columns as the files in data_minute/ and friends.
+
+schedule:
+  session_start: "09:15"
+  session_end: "15:30"
+  poll_seconds: 60                     # one cycle per minute
+  delay_seconds: 5                     # run this long after the minute turns, so Kite has finished the previous candle
+  start_before_open_minutes: 1         # wake up this long before the open
+  final_pass_after_close_minutes: 2    # keep cycling this long after the close: the 15:29 / last hourly bar closes then
+  weekdays: [0, 1, 2, 3, 4]            # Monday = 0
+  holidays: []                         # ["2026-11-19"]  trading holidays the collector should sleep through
+  extra_days: []                       # ["2026-11-08"]  special sessions on weekends or holidays (session times above apply)
+
+logging:
+  dir: "logs"
+  file: "live_collector.log"           # rolled over at midnight: live_collector.log.2026-11-10
+  keep_days: 60
+  level: "INFO"                        # DEBUG also logs every request
+  console: true
+
+instance_lock_port: 48731              # a local port held while running, so two collectors never write the same files
+
+# What each instrument kind means. A basket can override any of these under `overrides:`.
+instruments:
+  index:
+    exchange: "NSE"
+    symbol: "NIFTY 50"
+    volume_proxy: "NIFTYBEES"          # the index has no volume; this ETF's volume is used (like the Dhan files). null = zeros
+  futures:
+    exchange: "NFO"
+    name: "NIFTY"
+    contract: "front"                  # "front" = nearest expiry, "next" = the following one
+  options:
+    exchange: "NFO"
+    name: "NIFTY"
+    strike_step: 50
+    strike_min: -15                    # ATM-15 ... ATM+15 = 31 strikes x 2 = 62 contracts per expiry (one request each, every run)
+    strike_max: 15
+    expiries:                          # which expiries to collect (expiry_code in the files)
+      - {code: 1}                      #   1 = current week (nearest expiry)
+      - {code: 2}                      #   2 = next week
+      - {code: 3}                      #   3 = the week after
+      # each entry may set its own strike_min / strike_max, and `every: N, phase: P` to refresh it only on every N-th run
+      # of the basket (it then fetches everything since its last bar). That keeps a minute cycle inside Kite's 3 requests/s.
+    expiry_flag: "WEEK"                # label written to the expiry_flag column
+
+basket_files:
+  - live_minute.yaml
+  - live_5minute.yaml
+  - live_hourly.yaml
+  - live_daily.yaml
+
+# Top-up of missing history. At every start (and once on each later day) the collector looks at each basket's files from
+# start_date up to yesterday, downloads every day that is missing or incomplete, and only then continues live. Re-running it
+# is therefore always safe: complete days are never downloaded again. A basket file can set its own start_date.
+backfill:
+  enabled: true
+  start_date: "2026-11-01"
+  chunk_days: {minute: 55, 5minute: 95, 60minute: 380, day: 1900}   # largest window per Kite request, by interval
+  expiry_weekday: 1                    # Tuesday: expiries fall on this weekday (used to tell which futures contract was front month)
+
+state_file: "state/collector_state.json"   # holidays found while topping up, and days Kite can no longer serve

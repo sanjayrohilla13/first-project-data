@@ -1,0 +1,12 @@
+# Basket: 5-minute candles, fetched from Kite (not built from the 1-minute data). Runs each time a 5-minute bar closes
+# (09:20, 09:25, ...), measured from the 09:15 open.
+name: "five_minute"
+enabled: true
+folder: "data_5minute"
+kite_interval: "5minute"
+bar_minutes: 5
+instruments:
+  index: true
+  futures: true
+  options: true
+overrides: {}

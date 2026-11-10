@@ -1,0 +1,11 @@
+# Basket: 60-minute candles. Bars start at 09:15, 10:15, ... 15:15 (the last one closes at 15:30, like the hourly history).
+name: "hourly"
+enabled: true
+folder: "data_hourly"
+kite_interval: "60minute"
+bar_minutes: 60
+instruments:
+  index: true
+  futures: true
+  options: true
+overrides: {}

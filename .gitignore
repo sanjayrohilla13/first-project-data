@@ -1,0 +1,9 @@
+# secrets
+.kite_token.json
+*.env
+.env
+# collected data and logs
+data/
+logs/
+*.csv
+__pycache__/

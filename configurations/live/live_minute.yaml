@@ -1,0 +1,18 @@
+# Basket: 1-minute candles. Runs every minute.
+name: "minute"
+enabled: true
+folder: "data_minute"                  # under output.root
+kite_interval: "minute"
+bar_minutes: 1
+instruments:                           # which kinds to collect
+  index: true
+  futures: true
+  options: true
+overrides:
+  options:
+    # 3 expiries x 62 contracts = 186 requests (~66 s at 2.8/s), too many for a one-minute cycle. Expiry 1 is fetched every
+    # minute; expiries 2 and 3 every 4th minute (staggered: 2 minutes apart), each catching up on the bars since its last fetch.
+    expiries:
+      - {code: 1}
+      - {code: 2, every: 4, phase: 0}
+      - {code: 3, every: 4, phase: 2}
