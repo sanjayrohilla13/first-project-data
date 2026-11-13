@@ -10,9 +10,12 @@ instruments:                           # which kinds to collect
   options: true
 overrides:
   options:
-    # 3 expiries x 62 contracts = 186 requests (~66 s at 2.8/s), too many for a one-minute cycle. Expiry 1 is fetched every
-    # minute; expiries 2 and 3 every 4th minute (staggered: 2 minutes apart), each catching up on the bars since its last fetch.
+    # 3 expiries x 102 contracts = 306 requests (~110 s at 2.8/s): more than one minute allows, so not all three can be fetched every
+    # minute. Expiry 2 (next week) is the contract the strategy trades, so it is fetched EVERY minute (~36 s); the other two every 6th
+    # minute (staggered 3 minutes apart), each catching up on all bars since its last fetch. Every 6th minute the cycle is longer
+    # (~75 s); nothing is lost, the next cycle just starts when it ends.
+    # To trade another expiry, give that code {code: N} and the others `every: 6`.
     expiries:
-      - {code: 1}
-      - {code: 2, every: 4, phase: 0}
-      - {code: 3, every: 4, phase: 2}
+      - {code: 1, every: 6, phase: 0}
+      - {code: 2}
+      - {code: 3, every: 6, phase: 3}

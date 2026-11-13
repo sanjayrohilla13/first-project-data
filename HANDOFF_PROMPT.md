@@ -20,7 +20,7 @@ Rules that matter:
 2. **You probably cannot reach api.dhan.co / api.kite.trade from your sandbox** (the previous assistant got
    `SSLError CERTIFICATE_VERIFY_FAILED`). Do not disable certificate verification. Write code, test it with fakes (see the fake Kite in
    section 8), and give the user exact PowerShell commands to run on their PC; ask them to paste output back.
-3. Windows/PowerShell: scripts in the current folder need `.\` (`.\run_live_collector.bat`); `&&` is not available in Windows PowerShell 5.1;
+3. Windows/PowerShell: scripts in the current folder need `.\` (`.\script-data\run_live_collector.bat`); `&&` is not available in Windows PowerShell 5.1;
    use `python -c`/files rather than here-strings with backslashes (a `\r` in an edit once turned into a carriage return).
 4. Report results honestly, including failures. Backtest numbers below are **in-sample** (settings were chosen on the same data); do not present
    them as expected live performance.
@@ -31,7 +31,7 @@ Rules that matter:
 | Path | Purpose |
 |---|---|
 | `C:\Trading-Application\first-project` | Code + history: downloaders, backtester, history data (`data_daily/`, `data_hourly/`, `data_minute/`, `data_5min/`), configs, results. Git branch `testing-with-open-interest-0`. |
-| `C:\Trading-Application\first-project-data` | **This repo.** Live collector (`live_collector.py`), its configs (`configurations/live/`), output (`data/`), logs (`logs/`), state (`state/`), `README.md`, this file. |
+| `C:\Trading-Application\first-project-data` | **This repo.** Live collector (`script-data/live_collector.py`), its configs (`configurations/live/`), output (`data/`), logs (`logs/`), state (`state/`), `README.md`, this file. |
 
 `first-project/readme.MD` documents the history pipeline (credentials, `update_data.py`, per-dataset downloads, known data issues, backtests).
 `first-project-data/README.md` documents the live collector.
@@ -77,7 +77,7 @@ Rules that matter:
 
 ## 3. Credentials and login flow
 - Dhan: `data_download.env` (git-ignored) with the three TOTP variables; `python dhan_auth.py` to test. Fully automatic.
-- Kite: `KITE_API_KEY`, `KITE_API_SECRET`; daily `python download_data.py --login` (history repo) or `python live_collector.py --login` (this repo; writes its own `.kite_token.json`).
+- Kite: `KITE_API_KEY`, `KITE_API_SECRET`; daily `python download_data.py --login` (history repo) or `python script-data/live_collector.py --login` (this repo; writes its own `.kite_token.json`).
 
 ## 4. Backtester (`strategy.py`) — what exists
 
@@ -111,9 +111,9 @@ Findings: overnight trades lost money (-0.8M vs +2.6M intraday on v8); TrendChan
 confirm=3 looks like a lucky point (4 and 6 worse, 2 similar); 2023-24 are flat/negative in nearly every variant; hourly bars have no real edge (an untested variant, hold overnight + no target, reached 13.2% CAGR / Sharpe 0.81).
 Earlier minute-data work: v3-v7 (OI-only direction, IV filter was tested then **removed**, deep ITM v6 judged unreliable because strikes drop out of the ATM+-10 window, v9 `itm_steps`).
 
-## 5. Live collector (this repo) — `live_collector.py`
+## 5. Live collector (this repo) — `script-data/live_collector.py`
 
-Runs continuously (`python live_collector.py`, or `.\run_live_collector.bat` which restarts it after any exit). `--login`, `--once`, `--dry-run`, `--backfill-only`, `--config-dir`.
+Runs continuously (`python script-data/live_collector.py`, or `.\script-data\run_live_collector.bat` which restarts it after any exit). `--login`, `--once`, `--dry-run`, `--backfill-only`, `--config-dir`.
 
 **Config (`configurations/live/`)**: `live_common.yaml` (kite limits/token file, `output.root: data`, session 09:15-15:30, poll 60 s + 5 s delay, `holidays`, `extra_days`, logging, lock port, instrument definitions,
 `backfill`, `state_file`) plus one file per basket: `live_minute.yaml`, `live_5minute.yaml`, `live_hourly.yaml`, `live_daily.yaml` (`enabled`, `folder`, `kite_interval`, `bar_minutes`, `instruments`, `overrides`, optional `start_date`).
@@ -154,13 +154,13 @@ python strategy.py --config configurations/config_skew_mom_v11_5min.yaml
 python download_data.py --config configurations/config_download_5min.yaml --only futures
 
 # this repo (C:\Trading-Application\first-project-data)
-python live_collector.py --login        # once a day before 09:15
-python live_collector.py --dry-run
-.\run_live_collector.bat
+python script-data/live_collector.py --login        # once a day before 09:15
+python script-data/live_collector.py --dry-run
+.\script-data\run_live_collector.bat
 ```
 
 ## 8. How to test without network
-`live_collector.py` takes its Kite client from `KiteSession`; the previous session tested with a `FakeKite` (methods `profile()`, `instruments(exchange)`, `historical_data(token, from, to, interval, continuous, oi)`,
+`script-data/live_collector.py` takes its Kite client from `KiteSession`; the previous session tested with a `FakeKite` (methods `profile()`, `instruments(exchange)`, `historical_data(token, from, to, interval, continuous, oi)`,
 returning candle dicts with tz-aware IST `date`) and a `FakeSession`, a temp output folder, and calls `Collector.run_cycle(now)` with chosen datetimes (start-up top-up, restart, token loss, holiday, next day). Re-create that harness before changing the collector.
 Fake instruments need: NSE `NIFTY 50` and `NIFTYBEES`; NFO option rows (`instrument_token, tradingsymbol, name, expiry(date), strike, instrument_type CE/PE`) and `FUT` rows.
 

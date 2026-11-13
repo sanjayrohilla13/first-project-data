@@ -1,10 +1,10 @@
 # =========================================================
 # LIVE COLLECTOR: settings shared by every basket
 #
-#   python live_collector.py --login          # Kite login (once a day, before the market opens)
-#   python live_collector.py                  # run continuously: a cycle every minute, log in logs/live_collector.log
-#   python live_collector.py --once           # one cycle now (downloads whatever is due, e.g. the whole day so far)
-#   python live_collector.py --dry-run        # print the plan (baskets, files, requests per cycle) and exit
+#   python script-data/live_collector.py --login          # Kite login (once a day, before the market opens)
+#   python script-data/live_collector.py                  # run continuously: a cycle every minute, log in logs/live_collector.log
+#   python script-data/live_collector.py --once           # one cycle now (downloads whatever is due, e.g. the whole day so far)
+#   python script-data/live_collector.py --dry-run        # print the plan (baskets, files, requests per cycle) and exit
 #
 # One file per basket sits next to this one (live_minute.yaml, live_5minute.yaml, live_hourly.yaml, live_daily.yaml).
 # Switch a basket off with `enabled: false`, or add a new basket by copying one and listing it under basket_files.
@@ -12,7 +12,7 @@
 # =========================================================
 
 kite:
-  token_file: ".kite_token.json"       # in this folder; written by `python live_collector.py --login`
+  token_file: ".kite_token.json"       # in this folder; written by `python script-data/live_collector.py --login`
   max_requests_per_second: 2.8         # Kite allows 3 requests/s on the historical API
   retries: 3                           # attempts per request before an instrument is skipped for this cycle
   retry_wait_seconds: 2                # first wait between attempts (doubles each time)
@@ -56,8 +56,8 @@ instruments:
     exchange: "NFO"
     name: "NIFTY"
     strike_step: 50
-    strike_min: -15                    # ATM-15 ... ATM+15 = 31 strikes x 2 = 62 contracts per expiry (one request each, every run)
-    strike_max: 15
+    strike_min: -25                    # ATM-25 ... ATM+25 = 51 strikes x 2 = 102 contracts per expiry (one request each, every run)
+    strike_max: 25
     expiries:                          # which expiries to collect (expiry_code in the files)
       - {code: 1}                      #   1 = current week (nearest expiry)
       - {code: 2}                      #   2 = next week

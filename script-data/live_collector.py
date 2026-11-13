@@ -3,10 +3,10 @@ Continuous data collector for Zerodha Kite Connect: every minute it downloads wh
 basket (1-minute, 5-minute, hourly, daily) and every instrument kind (Nifty index, Nifty futures, Nifty weekly options),
 appends them to CSV files and writes a log.
 
-    python live_collector.py --login        # Kite login, once a day before the market opens (access tokens expire ~6 AM)
-    python live_collector.py                # run until stopped (Ctrl+C); sleeps outside market hours
-    python live_collector.py --once         # a single cycle now, then exit (also downloads the day so far)
-    python live_collector.py --dry-run      # show baskets, files and the request budget, then exit
+    python script-data/live_collector.py --login        # Kite login, once a day before the market opens (access tokens expire ~6 AM)
+    python script-data/live_collector.py                # run until stopped (Ctrl+C); sleeps outside market hours
+    python script-data/live_collector.py --once         # a single cycle now, then exit (also downloads the day so far)
+    python script-data/live_collector.py --dry-run      # show baskets, files and the request budget, then exit
 
 Settings: configurations/live/live_common.yaml (Kite, schedule, logging, instruments, output folder) plus one file per
 basket next to it (live_minute.yaml, live_5minute.yaml, live_hourly.yaml, live_daily.yaml).
@@ -18,7 +18,7 @@ How it stays correct
     the 15:30 close for the last 15:15 bar; daily: after the close).
   * Options: the contracts within ATM +- N strikes of the current index price for the nearest expiry(ies); strike_offset
     is worked out per bar from the index close, like the Dhan files. iv is empty (Kite has none).
-  * A lost token is picked up again without restarting: run `python live_collector.py --login` in another window.
+  * A lost token is picked up again without restarting: run `python script-data/live_collector.py --login` in another window.
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import yaml
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent.parent      # repo root (this file lives in script-data/); configs, data, logs, state, token stay there
 CONFIG_DIR = HERE / "configurations" / "live"
 IST = ZoneInfo("Asia/Kolkata")
 TZ = "Asia/Kolkata"
@@ -147,7 +147,7 @@ class KiteSession:
             k.profile()
         except Exception as e:                                   # noqa: BLE001 (any failure = unusable token)
             log.error(f"Kite rejected the access token ({type(e).__name__}: {e}). "
-                      "Run: python live_collector.py --login")
+                      "Run: python script-data/live_collector.py --login")
             self.client = None
             return None
         self.client, self._token = k, tok
@@ -158,7 +158,7 @@ class KiteSession:
         self.client = None
 
 
-def kite_login(kcfg: dict) -> None:
+def kite_login(kcfg: dict, allow_skip: bool = False) -> None:
     from kiteconnect import KiteConnect
     key, secret = os.environ.get("KITE_API_KEY"), os.environ.get("KITE_API_SECRET")
     if not (key and secret):
@@ -166,12 +166,50 @@ def kite_login(kcfg: dict) -> None:
     k = KiteConnect(api_key=key)
     print(f"1. Open and log in:\n   {k.login_url()}")
     print("2. After login you are redirected to a URL containing ?request_token=XXXX")
-    rt = input("3. Paste the request_token here: ").strip()
+    rt = input("3. Paste the request_token here" + (" (Enter = skip): " if allow_skip else ": ")).strip()
+    _login_state["skipped"] = False
+    if not rt and allow_skip:
+        _login_state["skipped"] = True
+        return
+    if "request_token=" in rt:                                    # the whole redirect URL was pasted
+        rt = rt.split("request_token=")[1].split("&")[0]
     s = k.generate_session(rt, api_secret=secret)
     p = Path(kcfg["token_file"])
     p = p if p.is_absolute() else HERE / p
     p.write_text(json.dumps({"date": datetime.now(IST).strftime("%Y-%m-%d"), "access_token": s["access_token"]}))
     print(f"Access token saved to {p} (valid for today only). The running collector picks it up by itself.")
+
+
+def ensure_login(session: "KiteSession", kcfg: dict, attempts: int = 3) -> bool:
+    """Start-up check: is today's Kite token valid? If not, walk through the login here (open the URL, paste the
+    request_token). An empty answer, no console input or `attempts` failures leave it without a token (False): the
+    collector then still starts and picks a token up once `--login` is run in another window."""
+    if session.get() is not None:
+        return True
+    if not sys.stdin or not sys.stdin.isatty():
+        log.warning("No valid Kite token and no console to ask on: run  python script-data/live_collector.py --login")
+        return False
+    log.warning("No valid Kite token for today: login needed (press Enter at the prompt to skip and log in from another window).")
+    for i in range(attempts):
+        try:
+            kite_login(kcfg, allow_skip=True)
+        except (EOFError, KeyboardInterrupt):
+            return False
+        except SystemExit:
+            raise
+        except Exception as e:                                   # noqa: BLE001
+            log.error(f"Login failed ({type(e).__name__}: {e}); attempt {i + 1} of {attempts}")
+            continue
+        if session.get() is not None:
+            return True
+        if not _login_state["skipped"]:
+            log.error("The token was saved but Kite did not accept it")
+        else:
+            return False
+    return False
+
+
+_login_state = {"skipped": False}
 
 
 class Throttle:
@@ -761,6 +799,8 @@ class Collector:
                 except Exception as e:                            # noqa: BLE001
                     self.errors.append(f"{b['name']}/{r.tradingsymbol}: {type(e).__name__}: {e}")
                     continue
+                if bars.empty:                                    # contract not listed yet / no trades in the window
+                    continue
                 bars = drop_open_bars(bars, self.cfg, now, bar)
                 bars = bars[bars["datetime"].dt.date.isin(dset)]
                 if not bars.empty:
@@ -818,7 +858,7 @@ class Collector:
         t0 = time.monotonic()
         kite = self.session.get()
         if kite is None:
-            return "no valid Kite token: run  python live_collector.py --login"
+            return "no valid Kite token: run  python script-data/live_collector.py --login"
         try:
             self.instruments(kite, now.date())
             if self._topup_day != now.date():
@@ -830,7 +870,7 @@ class Collector:
                     parts.append(f"{b['name']}: " + " ".join(f"{k}+{v}" for k, v in added.items() if v))
         except TokenLost as e:
             self.session.invalidate()
-            return f"Kite token rejected ({e}): run  python live_collector.py --login"
+            return f"Kite token rejected ({e}): run  python script-data/live_collector.py --login"
         self._check_holiday(now)
         msg = " | ".join(parts) if parts else "nothing due"
         msg += f" | {self.requests} requests {time.monotonic() - t0:.1f}s"
@@ -935,10 +975,9 @@ def main() -> None:
     session = KiteSession(cfg["kite"])
     col = Collector(cfg, session)
     if a.backfill_only:
-        k = session.get()
-        if k is None:
-            raise SystemExit("no valid Kite token: run  python live_collector.py --login")
-        col.topup(k, now_ist())
+        if not ensure_login(session, cfg["kite"]):
+            raise SystemExit("no valid Kite token: run  python script-data/live_collector.py --login")
+        col.topup(session.get(), now_ist())
         return
     if a.once:
         log.info("single cycle: " + col.run_cycle(now_ist()))
@@ -954,11 +993,36 @@ def main() -> None:
     sch = cfg["schedule"]
     log.info(f"Live collector started: baskets {[b['name'] for b in cfg['baskets']]}, output {cfg['output']['root']}")
     last_token_msg = None
+    # start-up order: 1) token valid? (else log in now)  2) backfill everything missing since the last download  3) go live
+    if ensure_login(session, cfg["kite"]):
+        log.info("Token OK: backfilling missing history before going live")
+        try:
+            col.topup(session.get(), now_ist())
+        except TokenLost as e:
+            session.invalidate()
+            log.error(f"Kite token rejected during the backfill ({e}): run --login")
+        except Exception as e:                                       # noqa: BLE001
+            log.warning(f"backfill failed: {type(e).__name__}: {e}")
+            col._topup_day = now_ist().date()
     while not stop["now"]:
         now = now_ist()
         if not in_active_window(cfg, now):
             nxt = next_active_start(cfg, now)
             log.info(f"Market closed: sleeping until {nxt:%a %Y-%m-%d %H:%M}")
+            if col._topup_day != now.date():                             # fill missing history now, not only at the next open
+                try:
+                    k = col.session.get()
+                    if k is not None:
+                        col.topup(k, now)
+                    else:
+                        log.warning("top-up postponed: no valid Kite token (run --login)")
+                        col._topup_day = now.date()
+                except TokenLost as e:
+                    col.session.invalidate()
+                    log.error(f"top-up stopped, Kite token rejected ({e}): run --login")
+                except Exception as e:                                   # noqa: BLE001
+                    log.warning(f"top-up failed: {type(e).__name__}: {e}")
+                    col._topup_day = now.date()
             sleep_until(nxt, lambda: stop["now"])
             continue
         # the next cycle time: the next minute boundary plus the delay

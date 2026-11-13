@@ -7,3 +7,4 @@ data/
 logs/
 *.csv
 __pycache__/
+results/
